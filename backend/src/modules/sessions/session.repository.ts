@@ -1,98 +1,157 @@
+import { and, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import { db } from "../../core/db";
 import { userSessions } from "../../core/db/schema";
-import { eq, lt } from "drizzle-orm";
-import { Session } from "./session.types";
+import type {
+  CreateSessionDTO,
+  Session,
+  SessionWithRefreshToken,
+} from "./session.types";
 
-export class SessionRepository {
+type SessionRow = typeof userSessions.$inferSelect;
 
-    async create(session: Session): Promise<void> {
-        await db.insert(userSessions).values({
-            sessionId: session.sessionId,
-            userId: session.userId,
-            device: session.device,
-            ip: session.ip,
-            userAgent: session.userAgent,
-            createdAt: session.createdAt,
-            expiresAt: session.expiresAt,
-            revokedAt: session.revokedAt,
-        });
+class SessionRepository {
+  async create(data: CreateSessionDTO): Promise<{ sessionId: string }> {
+    const [session] = await db
+      .insert(userSessions)
+      .values({
+        userId: data.userId,
+        refreshTokenHash: data.refreshTokenHash,
+        device: data.device,
+        ip: data.ip,
+        userAgent: data.userAgent,
+        expiresAt: data.expiresAt,
+      })
+      .returning({
+        sessionId: userSessions.sessionId,
+      });
+
+    if (!session) {
+      throw new Error("Failed to create session");
     }
 
-    async findById(sessionId: string): Promise<Session | null> {
+    return session;
+  }
 
-        const session = await db.query.userSessions.findFirst({
-            where: eq(userSessions.sessionId, sessionId),
-        });
+  async findById(sessionId: string): Promise<Session | null> {
+    const session = await db.query.userSessions.findFirst({
+      where: eq(userSessions.sessionId, sessionId),
+    });
 
-        if (!session) {
-            return null;
-        }
+    return session ? this.toSession(session) : null;
+  }
 
-        return {
-            sessionId: session.sessionId,
-            userId: session.userId,
-            device: session.device,
-            ip: session.ip,
-            userAgent: session.userAgent,
-            createdAt: session.createdAt!,
-            expiresAt: session.expiresAt,
-            revokedAt: session.revokedAt,
-        };
+  async findByRefreshTokenHash(
+    hash: string,
+  ): Promise<SessionWithRefreshToken | null> {
+    const session = await db.query.userSessions.findFirst({
+      where: eq(userSessions.refreshTokenHash, hash),
+    });
+
+    if (!session) {
+      return null;
     }
 
-    async revoke(sessionId: string): Promise<void> {
+    return {
+      ...this.toSession(session),
+      refreshTokenHash: session.refreshTokenHash,
+    };
+  }
 
-        await db
-            .update(userSessions)
-            .set({
-                revokedAt: new Date(),
-            })
-            .where(eq(userSessions.sessionId, sessionId));
+  async findActiveByUserId(
+    userId: number,
+    now = new Date(),
+  ): Promise<Session[]> {
+    const sessions = await db.query.userSessions.findMany({
+      where: and(
+        eq(userSessions.userId, userId),
+        isNull(userSessions.revokedAt),
+        gt(userSessions.expiresAt, now),
+      ),
+      orderBy: [desc(userSessions.createdAt)],
+    });
 
-    }
-    async findByUserId(
-        userId: number
-    ): Promise<Session[]> {
+    return sessions.map((session) => this.toSession(session));
+  }
 
-        const sessions =
-            await db.query.userSessions.findMany({
-                where: eq(userSessions.userId, userId),
-            });
+  async rotateRefreshToken(
+    sessionId: string,
+    newHash: string,
+    expiresAt: Date,
+  ): Promise<boolean> {
+    const result = await db
+      .update(userSessions)
+      .set({
+        refreshTokenHash: newHash,
+        lastSeenAt: new Date(),
+        expiresAt,
+      })
+      .where(
+        and(
+          eq(userSessions.sessionId, sessionId),
+          isNull(userSessions.revokedAt),
+        ),
+      )
+      .returning({ sessionId: userSessions.sessionId });
 
-        return sessions.map(session => ({
-            sessionId: session.sessionId,
-            userId: session.userId,
-            device: session.device,
-            ip: session.ip,
-            userAgent: session.userAgent,
-            createdAt: session.createdAt!,
-            expiresAt: session.expiresAt,
-            revokedAt: session.revokedAt,
-        }));
+    return result.length > 0;
+  }
 
-    }
-    async revokeAll(
-        userId: number
-    ): Promise<void> {
+  async revoke(sessionId: string, userId: number): Promise<boolean> {
+    const revoked = await db
+      .update(userSessions)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(userSessions.sessionId, sessionId),
+          eq(userSessions.userId, userId),
+          isNull(userSessions.revokedAt),
+        ),
+      )
+      .returning({ sessionId: userSessions.sessionId });
 
-        await db
-            .update(userSessions)
-            .set({
-                revokedAt: new Date(),
-            })
-            .where(eq(userSessions.userId, userId));
+    return revoked.length > 0;
+  }
 
-    }
-    async deleteExpired(): Promise<void> {
+  async revokeAll(userId: number): Promise<number> {
+    const now = new Date();
 
-        await db
-            .delete(userSessions)
-            .where(
-                lt(
-                    userSessions.expiresAt,
-                    new Date()
-                )
-            );
+    const revoked = await db
+      .update(userSessions)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(userSessions.userId, userId),
+          isNull(userSessions.revokedAt),
+          gt(userSessions.expiresAt, now),
+        ),
+      )
+      .returning({ sessionId: userSessions.sessionId });
 
-    }
+    return revoked.length;
+  }
+
+  async deleteExpired(): Promise<number> {
+    const deleted = await db
+      .delete(userSessions)
+      .where(lt(userSessions.expiresAt, new Date()))
+      .returning({ sessionId: userSessions.sessionId });
+
+    return deleted.length;
+  }
+
+  private toSession(session: SessionRow): Session {
+    return {
+      sessionId: session.sessionId,
+      userId: session.userId,
+      device: session.device,
+      ip: session.ip,
+      userAgent: session.userAgent,
+      createdAt: session.createdAt,
+      lastSeenAt: session.lastSeenAt,
+      expiresAt: session.expiresAt,
+      revokedAt: session.revokedAt,
+    };
+  }
 }
+
+export default new SessionRepository();

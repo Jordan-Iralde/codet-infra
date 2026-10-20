@@ -1,15 +1,20 @@
 import {
+  bigint,
+  index,
+  integer,
+  inet,
   pgTable,
-  serial,
   text,
   timestamp,
-  integer,
+  uuid,
+  varchar,
   boolean,
   jsonb,
-  index,
-  uuid,
+  serial,
+
 } from "drizzle-orm/pg-core";
 
+import { sql } from "drizzle-orm";
 /* =========================
    USERS
 ========================= */
@@ -110,6 +115,8 @@ export const userSettings = pgTable("user_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+
+
 /* =========================
    USER SESSIONS
 ========================= */
@@ -117,7 +124,13 @@ export const userSettings = pgTable("user_settings", {
 export const userSessions = pgTable(
   "user_sessions",
   {
-    id: serial("id").primaryKey(),
+    id: bigint("id", { mode: "number" })
+    .primaryKey().generatedAlwaysAsIdentity(),
+
+    sessionId: uuid("session_id")
+      .notNull()
+      .defaultRandom()
+      .unique(),
 
     userId: integer("user_id")
       .notNull()
@@ -125,15 +138,27 @@ export const userSessions = pgTable(
         onDelete: "cascade",
       }),
 
-    sessionId: uuid("session_id")
+    refreshTokenHash: varchar("refresh_token_hash", {
+      length: 64,
+    })
       .notNull()
       .unique(),
 
     device: text("device"),
 
-    ip: text("ip"),
+    ip: inet("ip"),
 
     userAgent: text("user_agent"),
+
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
+      .notNull()
+      .defaultNow(),
+
+    lastSeenAt: timestamp("last_seen_at", {
+      withTimezone: true,
+    }),
 
     expiresAt: timestamp("expires_at", {
       withTimezone: true,
@@ -142,16 +167,15 @@ export const userSessions = pgTable(
     revokedAt: timestamp("revoked_at", {
       withTimezone: true,
     }),
-
-    createdAt: timestamp("created_at", {
-      withTimezone: true,
-    }).defaultNow(),
   },
   (table) => ({
-    userIdx: index("idx_user_sessions_user")
-      .on(table.userId),
+    activeUserIdx: index("idx_user_sessions_active")
+      .on(table.userId, table.createdAt)
+      .where(sql`${table.revokedAt} IS NULL`),
   })
 );
+
+
 
 /* =========================
    API KEYS

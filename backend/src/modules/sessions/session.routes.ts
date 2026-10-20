@@ -1,31 +1,15 @@
-import router from "../auth/auth.routes";
-import { SessionController } from "./session.controller";
+import { Router } from "express";
+import sessionController from "./session.controller";
+import { authMiddleware } from "../../core/middlewares/auth.middleware";
 
-const controller = new SessionController();
+const router = Router();
 
-router.post("/", controller.create.bind(controller));
+router.post("/refresh", sessionController.refresh);
 
-router.get(
-    "/:sessionId",
-    controller.get.bind(controller)
-);
+// Rutas protegidas
 
-router.get(
-    "/:sessionId/validate",
-    controller.validate.bind(controller)
-);
+router.get("/", authMiddleware, sessionController.listActive);
+router.delete("/:sessionId", authMiddleware, sessionController.revoke);
+router.delete("/", authMiddleware, sessionController.revokeAll);
 
-router.get(
-    "/user/:userId",
-    controller.getUserSessions.bind(controller)
-);
-
-router.delete(
-    "/:sessionId",
-    controller.revoke.bind(controller)
-);
-
-router.delete(
-    "/user/:userId",
-    controller.revokeAll.bind(controller)
-);
+export default router;

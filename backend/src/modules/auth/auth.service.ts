@@ -131,7 +131,7 @@ export const loginUser = async (
   }
 
   // Create session
-  const session = await sessionService.createSession({
+  const sessionData = await sessionService.createSession({
     userId: user.id,
     device: dto.device,
     ip: dto.ip,
@@ -141,14 +141,14 @@ export const loginUser = async (
     ),
   });
 
-  // Generate JWT
+  // Generate JWT (incluyendo el sessionId para correlacionar con la BD)
   const token = jwt.sign(
     {
       userId: user.id,
       appId: dto.appId,
       email: user.email,
       name: user.name,
-      sessionId: session.sessionId,
+      sessionId: sessionData.sessionId,
     },
     ENV.JWT_SECRET,
     {
@@ -156,5 +156,9 @@ export const loginUser = async (
     }
   );
 
-  return { token, user: { id: user.id, email: user.email, name: user.name } };
+  return { 
+    token, 
+    refreshToken: sessionData.refreshToken, // Entregar para guardar en cookie segura en el controlador
+    user: { id: user.id, email: user.email, name: user.name } 
+  };
 };

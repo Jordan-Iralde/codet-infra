@@ -1,3 +1,4 @@
+
 import "express";
 
 declare global {
@@ -7,7 +8,9 @@ declare global {
         userId?: number;
         appId?: number;
         email?: string;
+        name?: string;
         role?: string;
+        sessionId?: string;
       };
     }
   }

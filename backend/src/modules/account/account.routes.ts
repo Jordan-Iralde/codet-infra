@@ -9,22 +9,5 @@ const router = Router();
 router.get("/me", authMiddleware, controller.getMeController);
 router.patch("/profile", authMiddleware, controller.updateProfile);
 router.patch("/password", authMiddleware, controller.changePasswordController);
-router.get(
-    "/sessions",
-    authMiddleware,
-    controller.getSessions
-);
-
-router.delete(
-    "/sessions/:sessionId",
-    authMiddleware,
-    controller.revokeSession
-);
-
-router.delete(
-    "/sessions",
-    authMiddleware,
-    controller.revokeAllSessions
-);
 
 export default router;
