@@ -11,16 +11,16 @@ app.set("trust proxy", true);
 // Configuración de CORS corregida para aceptar credenciales (cookies)
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "http://localhost:5174"],
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json());
 
 app.use((req, res, next) => {
-    console.log(req.method, req.path, req.body);
-    next();
+  console.log(req.method, req.path, req.body);
+  next();
 });
 
 app.use("/api", router);
